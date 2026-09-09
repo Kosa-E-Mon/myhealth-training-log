@@ -26,6 +26,30 @@ async function load(){
  rows=await request('/rest/v1/training_logs?training_date=eq.'+date+'&deleted_at=is.null&order=created_at.asc');render();
  const review=await request('/rest/v1/daily_reviews?training_date=eq.'+date);
  $('#daily').elements.comment.value=review[0]?.comment||'';$('#daily').elements.fatigue.value=review[0]?.fatigue||'';
+ await loadBody();
+}
+const valueOrNull=v=>v===''?null:Number(v);
+async function loadBody(){
+ const measurements=await request('/rest/v1/body_measurements?select=*&order=measured_at.desc&limit=180');measurements.reverse();
+ const profiles=await request('/rest/v1/health_profiles?select=height_cm');
+ const height=profiles[0]?.height_cm?Number(profiles[0].height_cm):null;
+ $('#profileForm').elements.height.value=height||'';
+ $('#bodyForm').elements.date.value=date;$('#bodyForm').elements.time.value=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+ renderBody(measurements,height);
+}
+function renderBody(items,height){
+ const box=$('#bodySummary'),svg=$('#weightChart');box.replaceChildren();svg.replaceChildren();
+ if(!items.length){box.innerHTML='<p>まだ身体データがありません。「体組成を記録」から追加できます。</p>';$('#bodyUpdated').textContent='';$('#weightTrend').textContent='';return;}
+ const latest=items.at(-1),weight=Number(latest.weight_kg),bmi=height&&weight?weight/((height/100)**2):null;
+ for(const [label,value] of [['体重',Number.isFinite(weight)?weight.toFixed(2)+' kg':'—'],['BMI',bmi?bmi.toFixed(1):'身長未設定'],['体脂肪率',latest.body_fat_percent!=null?Number(latest.body_fat_percent).toFixed(1)+' %':'—']]){const item=document.createElement('div');item.className='metric';item.innerHTML='<small></small><strong></strong>';item.querySelector('small').textContent=label;item.querySelector('strong').textContent=value;box.append(item);}
+ $('#bodyUpdated').textContent=new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric',...(latest.source==='healthplanet_graph_date_only'?{}:{hour:'2-digit',minute:'2-digit'})}).format(new Date(latest.measured_at));
+ const points=items.filter(x=>x.weight_kg!=null).slice(-30);drawChart(svg,points);const first=Number(points[0]?.weight_kg),diff=weight-first;$('#weightTrend').textContent=points.length<2?'比較用のデータが増えると変化を表示します。':`表示期間の変化 ${diff>0?'+':''}${diff.toFixed(2)} kg（${points.length}回）`;
+}
+function drawChart(svg,points){
+ if(points.length<2)return;const ns='http://www.w3.org/2000/svg',weights=points.map(x=>Number(x.weight_kg)),min=Math.min(...weights),max=Math.max(...weights),range=Math.max(max-min,.5),coords=weights.map((w,i)=>[18+i*(284/(weights.length-1)),94-(w-min)*70/range]);
+ for(const y of [24,59,94]){const line=document.createElementNS(ns,'line');line.setAttribute('x1','18');line.setAttribute('x2','302');line.setAttribute('y1',y);line.setAttribute('y2',y);line.setAttribute('class','chart-grid');svg.append(line);}
+ const path=document.createElementNS(ns,'polyline');path.setAttribute('points',coords.map(p=>p.join(',')).join(' '));path.setAttribute('class','chart-line');svg.append(path);coords.forEach(([x,y])=>{const c=document.createElementNS(ns,'circle');c.setAttribute('cx',x);c.setAttribute('cy',y);c.setAttribute('r','3.5');c.setAttribute('class','chart-dot');svg.append(c);});
+ for(const [text,x,anchor] of [[min.toFixed(1),4,'start'],[max.toFixed(1),316,'end']]){const t=document.createElementNS(ns,'text');t.textContent=text+'kg';t.setAttribute('x',x);t.setAttribute('y','114');t.setAttribute('text-anchor',anchor);t.setAttribute('class','chart-label');svg.append(t);}
 }
 function render(){
  $('#quests').replaceChildren();$('#progress').textContent=`${rows.filter(r=>r.status==='completed').length} / ${rows.length} 完了`;
@@ -56,4 +80,6 @@ $('#logout').onclick=()=>action(async()=>{if(session)try{await request('/auth/v1
 $('#refresh').onclick=()=>action(async()=>{await load();msg('最新の記録です。');});
 $('#manual').onsubmit=e=>{e.preventDefault();action(async()=>{if(date!==day()){await load();throw new Error('日付が変わりました。再入力してください。');}const f=e.target.elements;await insert(rowData('manual',f.exercise.value.trim(),Number(f.reps.value),Number(f.sets.value),'manual:'+manualId));manualId=crypto.randomUUID();e.target.reset();await load();msg('追加しました。実施後に体感ボタンを押してください。');});};
 $('#daily').onsubmit=e=>{e.preventDefault();action(async()=>{if(date!==day())throw new Error('日付が変わりました。内容を控えて再読込してください。');await request('/rest/v1/daily_reviews?on_conflict=user_id,training_date','POST',{user_id:session.user.id,training_date:date,fatigue:e.target.elements.fatigue.value||null,comment:e.target.elements.comment.value},'resolution=merge-duplicates,return=representation');msg('一日のコメントを保存しました。');});};
+$('#bodyForm').onsubmit=e=>{e.preventDefault();action(async()=>{const f=e.target.elements,measuredAt=new Date(`${f.date.value}T${f.time.value}:00+09:00`);if(Number.isNaN(measuredAt.getTime()))throw new Error('測定日時を確認してください。');await request('/rest/v1/body_measurements?on_conflict=user_id,measured_at,source','POST',{user_id:session.user.id,measured_at:measuredAt.toISOString(),weight_kg:Number(f.weight.value),body_fat_percent:valueOrNull(f.fat.value),muscle_mass_kg:valueOrNull(f.muscle.value),visceral_fat_level:valueOrNull(f.visceral.value),source:'manual'},'resolution=merge-duplicates,return=representation');await loadBody();msg('身体データを保存しました。');});};
+$('#profileForm').onsubmit=e=>{e.preventDefault();action(async()=>{await request('/rest/v1/health_profiles?on_conflict=user_id','POST',{user_id:session.user.id,height_cm:Number(e.target.elements.height.value)},'resolution=merge-duplicates,return=representation');await loadBody();msg('身長を保存し、BMIを更新しました。');});};
 $('#date').textContent=date;msg(configured()?'ログインして今日の予定を表示します。':'接続設定前です。READMEの手順でSupabaseを設定してください。');
