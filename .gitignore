@@ -1,0 +1,10 @@
+# Never publish local data or credentials if files are added later.
+.env
+.env.*
+*.sqlite*
+*.db
+*.json
+*.log
+__pycache__/
+healthplanet-*
+profile.json

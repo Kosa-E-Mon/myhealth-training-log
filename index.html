@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>本日の軍議 | MyHealth</title><link rel="stylesheet" href="style.css"></head>
+<body><main><header><small>MY HEALTH / TRAINING</small><h1>本日の軍議</h1><p id="date"></p></header>
+<p id="message" role="status" aria-live="polite"></p>
+<form id="login"><h2>本人ログイン</h2><label>メール<input id="email" type="email" autocomplete="username" required></label><label>パスワード<input id="password" type="password" autocomplete="current-password" required></label><button>ログイン</button><p>ご本人のアカウントを管理画面で作成してから利用してください。</p></form>
+<section id="workspace" hidden><div class="toolbar"><button id="refresh" class="secondary">再読込</button><button id="logout" class="secondary">ログアウト</button></div>
+<p class="notice">定番メニューです。AIの判断ではありません。朝5:30〜6:00／土曜朝は休み。体調に合わせて見送れます。</p><h2>本日のクエスト <span id="progress"></span></h2><div id="quests"></div>
+<details><summary>＋ 種目・追加セットを登録</summary><form id="manual"><label>種目名<input name="exercise" maxlength="100" required></label><div class="pair"><label>回数<input name="reps" type="number" min="1" max="1000" value="10" required></label><label>セット<input name="sets" type="number" min="1" max="100" value="2" required></label></div><button>予定に追加</button></form></details>
+<details><summary>一日のコメント・疲労</summary><form id="daily"><label>疲労<select name="fatigue"><option value="">未評価</option><option value="low">少ない</option><option value="normal">普通</option><option value="high">強い</option></select></label><label>今日の振り返り<textarea name="comment" maxlength="4000" placeholder="スマホのキーボードの音声入力も使えます"></textarea></label><button>コメントを保存</button></form></details></section>
+<footer>保存先：Supabase（本人のみ閲覧）<br>通信が必要です。保存完了の表示を確認してください。</footer></main><script src="config.js"></script><script src="app.js"></script></body></html>
