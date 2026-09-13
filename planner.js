@@ -19,14 +19,15 @@ const TrainingPlanner = (() => {
   const review=reviews.filter(r=>r.training_date<=date).sort((a,b)=>b.training_date.localeCompare(a.training_date))[0];
   const reviewAge=review?(new Date(date+'T00:00:00+09:00')-new Date(review.training_date+'T00:00:00+09:00'))/86400000:Infinity;
   const high=reviewAge<=1&&review?.fatigue==='high';
-  const legs=elapsed<2&&last.some(r=>/ブルガリアン|スクワット|腰割り/.test(r.exercise_name));
+  const requestedLegRest=review?.training_date===date&&/下半身を休む/.test(review.comment||'');
+  const legs=requestedLegRest||(elapsed<2&&last.some(r=>/ブルガリアン|スクワット|腰割り/.test(r.exercise_name)));
   const upper=elapsed<2&&last.some(r=>/プッシュアップ|腕立て/.test(r.exercise_name));
   const core=elapsed<2&&last.some(r=>/プランク|腹筋|ローラー/.test(r.exercise_name));
   const hard=elapsed<=1&&last.some(r=>['hard','near_limit','fatigued'].includes(r.effort_level));
   const reasons=[lastDate?`参照した運動実績：${lastDate}、${last.map(r=>r.exercise_name).join('・')}。${elapsed>1?'前日実績がないため直近の記録を参照。未記録は未実施と断定しません。':''}`:'参照期間内に完了実績がありません。未記録を未実施と断定せず、控えめな量から開始します。'];
   if(weekday===6||high){reasons.push(high?'直近の疲労が強いため休養を提案します。':'土曜朝は英語コーチのため休養日です。');return {exercises:[],reasons};}
   let keys=[1,3,5].includes(weekday)?['koshiwari','bulgarian','pushup']:['birdDog','proneW','plank'];
-  if(legs){keys=keys.filter(k=>!['koshiwari','bulgarian'].includes(k));reasons.push('前日に下半身の実績があるため、今日は脚の主運動を休みます。腰割りも脚を使うので回復日に追加しません。');}
+  if(legs){keys=keys.filter(k=>!['koshiwari','bulgarian'].includes(k));reasons.push(requestedLegRest?'本日のコメントに「下半身を休む」とあるため、脚の主運動を休みます。':'前日に下半身の実績があるため、今日は脚の主運動を休みます。腰割りも脚を使うので回復日に追加しません。');}
   if(upper)keys=keys.filter(k=>k!=='pushup');
   if(core){keys=keys.filter(k=>!['plank','birdDog'].includes(k));reasons.push('前日に腹筋・体幹の実績があるため、プランクや腹筋ローラーの追加を避けます。プッシュアップは壁を使い軽めにします。');}
   if(!keys.length)keys=['proneW'];

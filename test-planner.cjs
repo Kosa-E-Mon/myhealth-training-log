@@ -10,3 +10,4 @@ assert.equal(recovery.exercises.find(e=>e[0]==='pushup')[1],'壁プッシュア�
 assert.ok(build('2026-09-16',[entry('腰割り')]).exercises.some(e=>e[0]==='bulgarian'));
 assert.deepEqual(build('2026-09-14',[{...entry('腰割り'),status:'planned'}]).exercises,build('2026-09-14').exercises);
 console.log('Planner: rest, fatigue, lower-body/core recovery, fallback and planned-only cases passed.');
+assert.ok(!build('2026-09-14',[],[{training_date:'2026-09-14',comment:'下半身を休む'}]).exercises.some(e=>e[0]==='bulgarian'));
