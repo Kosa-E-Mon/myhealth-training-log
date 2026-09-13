@@ -4,9 +4,7 @@ const config = window.TRAINING_CONFIG;
 const day = () => new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date());
 let date=day(), session=null, busy=false, rows=[], manualId=crypto.randomUUID();
 const msg=t=>$('#message').textContent=t;
-const exercises={pushup:['pushup','プッシュアップ',10,2,'reps'],bulgarian:['bulgarian','ブルガリアンスクワット（左右各）',15,2,'reps'],roller:['roller','腹筋ローラー',6,2,'reps'],legraise:['legraise','足上げ腹筋',10,2,'reps'],plank:['plank','プランク',30,2,'seconds']};
-const weeklyPlans={0:['plank','legraise'],1:['pushup','roller'],2:['bulgarian','legraise'],3:['pushup','plank'],4:['bulgarian','legraise'],5:['pushup','bulgarian'],6:[]};
-const defaultsForToday=()=>weeklyPlans[new Date(day()+'T12:00:00+09:00').getUTCDay()].map(key=>exercises[key]);
+let planReasons=[];
 const efforts={easy:'🙂 余裕あり',good:'👍 ちょうどいい',hard:'😮‍💨 きつい',near_limit:'🥵 限界近い',fatigued:'😴 疲労あり'};
 function configured(){
  let publicKey=config.key?.startsWith('sb_publishable_');
@@ -23,8 +21,13 @@ function rowData(id,name,amount,sets,key,unit='reps'){return {user_id:session.us
 async function insert(data){return request('/rest/v1/training_logs?on_conflict=user_id,training_date,instance_key','POST',data,'resolution=ignore-duplicates,return=representation');}
 async function load(){
  date=day();$('#date').textContent=date;
- // Saturday starts empty. Stable keys keep the same day's default quests on reload.
- const defaults=defaultsForToday();if(defaults.length)await insert(defaults.map(d=>rowData(d[0],d[1],d[2],d[3],'default:'+d[0],d[4])));
+ const history=await request('/rest/v1/training_logs?training_date=lt.'+date+'&status=eq.completed&deleted_at=is.null&order=training_date.desc&limit=500');
+ const reviews=await request('/rest/v1/daily_reviews?training_date=lte.'+date+'&order=training_date.desc&limit=30');
+ const plan=TrainingPlanner.build(date,history,reviews);planReasons=plan.reasons;
+ const existing=await request('/rest/v1/training_logs?training_date=eq.'+date+'&order=created_at.asc');
+ // Keep completed/skipped and manual rows intact. Retire obsolete uncompleted defaults recoverably.
+ for(const r of existing.filter(r=>r.instance_key.startsWith('default:')&&r.status==='planned'&&!r.deleted_at&&!plan.exercises.some(d=>r.instance_key==='default:'+d[0])))await request('/rest/v1/training_logs?id=eq.'+r.id+'&status=eq.planned','PATCH',{deleted_at:new Date().toISOString()});
+ for(const d of plan.exercises){const data=rowData(d[0],d[1],d[2],d[3],'default:'+d[0],d[4]),prior=existing.find(r=>r.instance_key===data.instance_key);if(!prior)await insert(data);else if(prior.status==='planned')await request('/rest/v1/training_logs?id=eq.'+prior.id+'&status=eq.planned','PATCH',{exercise_name:data.exercise_name,planned_reps:data.planned_reps,planned_seconds:data.planned_seconds,planned_sets:data.planned_sets,deleted_at:null});}
  rows=await request('/rest/v1/training_logs?training_date=eq.'+date+'&deleted_at=is.null&order=created_at.asc');render();
  const review=await request('/rest/v1/daily_reviews?training_date=eq.'+date);
  $('#daily').elements.comment.value=review[0]?.comment||'';$('#daily').elements.fatigue.value=review[0]?.fatigue||'';
@@ -40,13 +43,17 @@ async function loadBody(){
  renderBody(measurements,height);renderStrategist(measurements,height);
 }
 function renderStrategist(items,height){
- const latest=items.at(-1),previous=items.at(-2),reasons=[];let changeText='比較できる測定がまだありません。';
+ const reference=items.filter(r=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date(r.measured_at))<date);
+ const latest=reference.at(-1),previous=reference.at(-2),reasons=[...planReasons];let changeText='前日以前の比較できる測定がまだありません。';
+ if(latest)reasons.push('身体データの参照日時：'+new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',dateStyle:'short',timeStyle:'short'}).format(new Date(latest.measured_at))+'。前日測定を優先し、なければ直近値を使います。');
  if(latest&&previous){const diff=Number(latest.weight_kg)-Number(previous.weight_kg);changeText=Math.abs(diff)<.2?`直近の体重はほぼ横ばい（${diff>0?'+':''}${diff.toFixed(2)}kg）です。`:`直近の体重は${diff<0?'減少':'増加'}（${diff>0?'+':''}${diff.toFixed(2)}kg）です。`;reasons.push('一回の増減だけで負荷を急に変えず、継続しやすさを優先します。');}
  else reasons.push(changeText);
  const planned=rows.filter(r=>r.status==='planned').map(r=>r.exercise_name),fatigue=$('#daily').elements.fatigue.value;
  if(latest&&height){const bmi=Number(latest.weight_kg)/((height/100)**2);reasons.unshift(`最新値は${Number(latest.weight_kg).toFixed(2)}kg、BMI ${bmi.toFixed(1)}。${latest.body_fat_percent!=null?`体脂肪率 ${Number(latest.body_fat_percent).toFixed(1)}%。`:''}`);}
  reasons.push(fatigue==='high'?'疲労が強いため、回数を半分にするか見送る判断を優先します。':fatigue==='low'?'疲労は少なめ。フォームを崩さない範囲で予定どおり進めます。':'疲労が未評価または普通のため、予定量を上限として開始します。');
- $('#strategistComment').textContent=`${changeText} 今日は${planned.length?planned.join('と'):'休養'}を提案します。昨日の未記録分は持ち越さず、今日から新しい作戦として扱います。`;
+ reasons.push('体重や体脂肪率の一日変動は水分にも左右されます。脂肪減少や筋肉減少とは断定せず、数週間の推移を見ます。減量は筋トレに加え、無理のない歩行と食事量も組み合わせます。');
+ $('#strategistComment').textContent=`${changeText} ${planned.length?'今日の残りの提案：'+planned.join('・'):rows.some(r=>r.status==='completed')?'今日の予定は達成済みです。追加は必須ではありません。':'今日は休養を提案します。'} 朝30分以内を目安に、痛みが出る種目は見送ってください。`;
+ for(const r of rows.filter(r=>r.status==='planned'))if(TrainingPlanner.parts[r.exercise_id])reasons.push(r.exercise_name+'：'+TrainingPlanner.parts[r.exercise_id]);
  const list=$('#strategistReasons');list.replaceChildren();for(const text of reasons){const div=document.createElement('div');div.className='reason';div.textContent=text;list.append(div);}
 }
 function renderBody(items,height){
@@ -84,14 +91,14 @@ function render(){
  for(const [key,label] of Object.entries(efforts).filter(([k])=>k!=='good')){const b=document.createElement('button');b.textContent=label;b.onclick=()=>finish(key);card.querySelector('.ratings').append(b);}
  card.querySelector('.skip').onclick=()=>finish(null,'skipped');
  card.querySelector('.note').onclick=()=>action(async()=>{await request('/rest/v1/training_logs?id=eq.'+r.id,'PATCH',{comment:note.value});r.comment=note.value;msg('コメントを保存しました。');});
- if(r.status!=='planned'){card.querySelector('.primary').textContent=r.status==='completed'?`✓ 達成済み ${r['actual_'+measure]}${unit} × ${r.actual_sets}セット / ${efforts[r.effort_level]}`:'見送り済み';card.querySelectorAll('.controls button,.controls input,.primary,.ratings button,.skip').forEach(el=>{el.disabled=true;el.dataset.locked='true';});}
+ if(r.status!=='planned'){card.querySelector('.primary').textContent=r.status==='completed'?`✓ 達成済み ${r['actual_'+measure]}${unit} × ${r.actual_sets}セット / ${efforts[r.effort_level]||'体感未申告'}`:'見送り済み';card.querySelectorAll('.controls button,.controls input,.primary,.ratings button,.skip').forEach(el=>{el.disabled=true;el.dataset.locked='true';});}
  $('#quests').append(card);}
 }
 $('#login').onsubmit=e=>{e.preventDefault();action(async()=>{if(!configured())throw new Error('最初に mobile/config.js にSupabase URLと公開キーを設定してください。');session=null;session=await request('/auth/v1/token?grant_type=password','POST',{email:$('#email').value,password:$('#password').value});$('#password').value='';$('#login').hidden=true;$('#workspace').hidden=false;await load();msg('読み込みました。');});};
 $('#logout').onclick=()=>action(async()=>{if(session)try{await request('/auth/v1/logout','POST');}catch{}session=null;rows=[];$('#quests').replaceChildren();$('#workspace').hidden=true;$('#login').hidden=false;msg('ログアウトしました。');});
 $('#refresh').onclick=()=>action(async()=>{await load();msg('最新の記録です。');});
 $('#manual').onsubmit=e=>{e.preventDefault();action(async()=>{if(date!==day()){await load();throw new Error('日付が変わりました。再入力してください。');}const f=e.target.elements;await insert(rowData('manual',f.exercise.value.trim(),Number(f.amount.value),Number(f.sets.value),'manual:'+manualId,f.unit.value));manualId=crypto.randomUUID();e.target.reset();await load();msg('追加しました。実施後に体感ボタンを押してください。');});};
-$('#daily').onsubmit=e=>{e.preventDefault();action(async()=>{if(date!==day())throw new Error('日付が変わりました。内容を控えて再読込してください。');await request('/rest/v1/daily_reviews?on_conflict=user_id,training_date','POST',{user_id:session.user.id,training_date:date,fatigue:e.target.elements.fatigue.value||null,comment:e.target.elements.comment.value},'resolution=merge-duplicates,return=representation');await loadBody();msg('一日のコメントを保存し、軍師の判断を更新しました。');});};
+$('#daily').onsubmit=e=>{e.preventDefault();action(async()=>{if(date!==day())throw new Error('日付が変わりました。内容を控えて再読込してください。');await request('/rest/v1/daily_reviews?on_conflict=user_id,training_date','POST',{user_id:session.user.id,training_date:date,fatigue:e.target.elements.fatigue.value||null,comment:e.target.elements.comment.value},'resolution=merge-duplicates,return=representation');await load();msg('一日のコメントを保存し、軍師の判断と未完了の提案を更新しました。');});};
 $('#bodyForm').onsubmit=e=>{e.preventDefault();action(async()=>{const f=e.target.elements,measuredAt=new Date(`${f.date.value}T${f.time.value}:00+09:00`);if(Number.isNaN(measuredAt.getTime()))throw new Error('測定日時を確認してください。');await request('/rest/v1/body_measurements?on_conflict=user_id,measured_at,source','POST',{user_id:session.user.id,measured_at:measuredAt.toISOString(),weight_kg:Number(f.weight.value),body_fat_percent:valueOrNull(f.fat.value),muscle_mass_kg:valueOrNull(f.muscle.value),visceral_fat_level:valueOrNull(f.visceral.value),source:'manual'},'resolution=merge-duplicates,return=representation');await loadBody();msg('身体データを保存しました。');});};
 $('#profileForm').onsubmit=e=>{e.preventDefault();action(async()=>{await request('/rest/v1/health_profiles?on_conflict=user_id','POST',{user_id:session.user.id,height_cm:Number(e.target.elements.height.value)},'resolution=merge-duplicates,return=representation');await loadBody();msg('身長を保存し、BMIを更新しました。');});};
 $('#date').textContent=date;msg(configured()?'ログインして今日の予定を表示します。':'接続設定前です。READMEの手順でSupabaseを設定してください。');

@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+const {build}=require('./planner');
+const entry=(exercise_name,training_date='2026-09-13')=>({exercise_name,training_date,status:'completed',effort_level:'good'});
+assert.equal(build('2026-09-19').exercises.length,0);
+assert.equal(build('2026-09-14',[],[{training_date:'2026-09-14',fatigue:'high'}]).exercises.length,0);
+assert.ok(build('2026-09-14').exercises.some(e=>e[0]==='bulgarian'));
+const recovery=build('2026-09-14',[entry('腰割り'),entry('プランク')]);
+assert.ok(!recovery.exercises.some(e=>['bulgarian','koshiwari','plank','birdDog'].includes(e[0])));
+assert.equal(recovery.exercises.find(e=>e[0]==='pushup')[1],'壁プッシュアップ');
+assert.ok(build('2026-09-16',[entry('腰割り')]).exercises.some(e=>e[0]==='bulgarian'));
+assert.deepEqual(build('2026-09-14',[{...entry('腰割り'),status:'planned'}]).exercises,build('2026-09-14').exercises);
+console.log('Planner: rest, fatigue, lower-body/core recovery, fallback and planned-only cases passed.');
