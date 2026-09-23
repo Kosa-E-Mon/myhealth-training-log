@@ -48,6 +48,6 @@ const TrainingPlanner = (() => {
   if(hard)reasons.push('直近の体感がきつめなので各1セットへ減らします。');
   return {exercises:keys.map(k=>{const item=[...catalog[k]];if(hard)item[3]=1;if(recoveryLeg===k){item[2]=item[4]==='seconds'?20:6;item[3]=1;}if(core&&k==='pushup'){item[1]='壁プッシュアップ';item[2]=8;item[3]=1;}return item;}),reasons};
  }
- return {build,parts,metadata};
+ return {build,parts,metadata,catalog};
 })();
 if(typeof module!=='undefined')module.exports=TrainingPlanner;
