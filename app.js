@@ -72,29 +72,40 @@ function drawChart(svg,points){
  const path=document.createElementNS(ns,'polyline');path.setAttribute('points',coords.map(p=>p.join(',')).join(' '));path.setAttribute('class','chart-line');svg.append(path);coords.forEach(([x,y])=>{const c=document.createElementNS(ns,'circle');c.setAttribute('cx',x);c.setAttribute('cy',y);c.setAttribute('r','3.5');c.setAttribute('class','chart-dot');svg.append(c);});
  for(const [text,x,anchor] of [[min.toFixed(1),4,'start'],[max.toFixed(1),316,'end']]){const t=document.createElementNS(ns,'text');t.textContent=text+'kg';t.setAttribute('x',x);t.setAttribute('y','114');t.setAttribute('text-anchor',anchor);t.setAttribute('class','chart-label');svg.append(t);}
 }
-function tone(kind='work'){
- try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=kind==='start'?1046:kind==='end'?660:880;o.type='sine';g.gain.setValueAtTime(.0001,c.currentTime);g.gain.exponentialRampToValueAtTime(.16,c.currentTime+.01);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+(kind==='end'?.35:.12));o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+(kind==='end'?.38:.15));setTimeout(()=>c.close(),500);}catch{}
- if(navigator.vibrate)navigator.vibrate(kind==='end'?[120,70,180]:80);
+let timerAudio;
+let activeTimerStop=null;
+function tone(kind='count'){
+ try{
+  const C=window.AudioContext||window.webkitAudioContext;if(!C)return;
+  timerAudio??=new C();if(timerAudio.state==='suspended')timerAudio.resume();
+  const notes=kind==='start'?[[784,0,.18],[1175,.12,.36]]:kind==='rest'?[[659,0,.17],[523,.14,.28]]:kind==='end'?[[784,0,.16],[988,.17,.16],[1319,.34,.55]]:[[880,0,.11]];
+  for(const [frequency,offset,duration] of notes){const o=timerAudio.createOscillator(),g=timerAudio.createGain(),at=timerAudio.currentTime+offset;o.type='sine';o.frequency.setValueAtTime(frequency,at);g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.2,at+.025);g.gain.exponentialRampToValueAtTime(.0001,at+duration);o.connect(g).connect(timerAudio.destination);o.start(at);o.stop(at+duration+.02);}
+ }catch{}
+ if(navigator.vibrate)navigator.vibrate(kind==='end'?[100,80,100,80,180]:kind==='start'?120:60);
 }
 function startTimer(panel,seconds,sets,startButton){
+ activeTimerStop?.();
  let phase='countdown',left=3,current=1,handle;
+ const stop=()=>{clearInterval(handle);panel.hidden=true;startButton.disabled=false;if(activeTimerStop===stop)activeTimerStop=null;};
+ activeTimerStop=stop;
  const show=(text,sub='')=>{panel.hidden=false;panel.querySelector('.timer-main').textContent=text;panel.querySelector('.timer-sub').textContent=`${sub}${sub?' ・ ':''}${current}/${sets}セット`;};
  startButton.disabled=true;panel.querySelector('.timer-stop').hidden=false;show('3','開始まで');tone();
  handle=setInterval(()=>{
   if(phase==='countdown'){left--;if(left>0){show(String(left),'開始まで');tone();}else{phase='work';left=seconds;show(String(left),'運動');tone('start');}}
-  else if(phase==='work'){left--;if(left>0)show(String(left),'運動');else if(current<sets){phase='interval';left=15;show(String(left),'休憩');tone();}else{clearInterval(handle);show('終了','完了ボタンで記録');tone('end');startButton.disabled=false;panel.querySelector('.timer-stop').hidden=true;}}
-  else {left--;if(left<=3&&left>0){show(String(left),'次セット開始まで');tone();}else if(left>0)show(String(left),'休憩');else{current++;phase='countdown';left=3;show('3','開始まで');tone();}}
+  else if(phase==='work'){left--;if(left>0)show(String(left),'運動');else if(current<sets){phase='interval';left=15;show(String(left),'休憩');tone('rest');}else{clearInterval(handle);activeTimerStop=null;show('終了','完了ボタンで記録');tone('end');startButton.disabled=false;panel.querySelector('.timer-stop').hidden=true;}}
+  else {left--;if(left<=3&&left>0){show(String(left),'次セット開始まで');tone();}else if(left>0)show(String(left),'休憩');else{current++;phase='work';left=seconds;show(String(left),'運動');tone('start');}}
  },1000);
- panel.querySelector('.timer-stop').onclick=()=>{clearInterval(handle);panel.hidden=true;startButton.disabled=false;};
+ panel.querySelector('.timer-stop').onclick=stop;
 }
 function render(){
+ activeTimerStop?.();
  $('#quests').replaceChildren();$('#progress').textContent=`${rows.filter(r=>r.status==='completed').length} / ${rows.length} 完了`;
  if(!rows.length){const p=document.createElement('p');p.textContent='今日は予定なし。休養するか、必要なら手動で追加してください。';$('#quests').append(p);}
  for(const r of rows){const card=document.createElement('article');card.className=r.status==='completed'?'done':'';
  card.innerHTML='<h3></h3><p class="plan"></p><p class="load-note"></p><div class="controls"></div><div class="timer" hidden aria-live="polite"><strong class="timer-main"></strong><span class="timer-sub"></span><button class="timer-stop secondary">停止</button></div><button class="primary">👍 ちょうどいい・完了</button><details><summary>別の体感・コメント・見送り</summary><div class="ratings"></div><label>コメント<textarea maxlength="4000"></textarea></label><button class="note secondary">コメント保存</button> <button class="skip secondary">今日は見送る</button></details>';
  const measure=r.planned_seconds!=null?'seconds':'reps',unit=measure==='seconds'?'秒':'回';card.querySelector('h3').textContent=r.exercise_name;card.querySelector('.plan').textContent=`予定 ${r['planned_'+measure]}${unit} × ${r.planned_sets}セット`;
  const meta=TrainingPlanner.metadata[r.exercise_id];if(meta)card.querySelector('.load-note').textContent=`使用部位：${meta.regions.join('・')} ／ ${meta.pattern} ／ 負荷：${meta.load}・${meta.intensity} ／ 回復目安：${meta.recovery}`;
- if(measure==='seconds'){const timerButton=document.createElement('button');timerButton.className='timer-start secondary';timerButton.title=`${r.planned_seconds}秒×${r.planned_sets}セットのタイマー`;timerButton.setAttribute('aria-label',timerButton.title);timerButton.textContent='⏱';timerButton.onclick=()=>startTimer(card.querySelector('.timer'),Number(r.planned_seconds),Number(r.planned_sets),timerButton);card.querySelector('.controls').before(timerButton);}
+ if(measure==='seconds'){const timerButton=document.createElement('button');timerButton.className='timer-start secondary';timerButton.title='入力中の秒数・セット数でタイマー開始';timerButton.setAttribute('aria-label',timerButton.title);timerButton.textContent='⏱';timerButton.onclick=()=>{const seconds=Number(card.querySelector('[data-field=seconds]').value),sets=Number(card.querySelector('[data-field=sets]').value);if(!Number.isInteger(seconds)||seconds<1||seconds>3600||!Number.isInteger(sets)||sets<1||sets>100){msg('タイマーは秒数1〜3600、セット1〜100を整数で入力してください。');return;}startTimer(card.querySelector('.timer'),seconds,sets,timerButton);};card.querySelector('.controls').before(timerButton);}
  for(const [key,label,max] of [[measure,unit==='秒'?'秒数':'回数',measure==='seconds'?3600:1000],['sets','セット',100]]){const wrap=document.createElement('label');wrap.textContent=label;const counter=document.createElement('div');counter.className='counter';const input=document.createElement('input');input.type='number';input.min=1;input.max=max;input.value=r['actual_'+key]??r['planned_'+key];input.dataset.field=key;input.setAttribute('aria-label',r.exercise_name+' '+label);
  for(const delta of [-1,1]){const b=document.createElement('button');b.textContent=delta<0?'−':'＋';b.setAttribute('aria-label',label+(delta<0?'を減らす':'を増やす'));b.onclick=()=>input.value=Math.min(max,Math.max(1,Number(input.value)+delta));counter.append(b);if(delta===-1)counter.append(input);}
  wrap.append(counter);card.querySelector('.controls').append(wrap);}
@@ -110,7 +121,7 @@ function render(){
  for(const [key,label] of Object.entries(efforts).filter(([k])=>k!=='good')){const b=document.createElement('button');b.textContent=label;b.onclick=()=>finish(key);card.querySelector('.ratings').append(b);}
  card.querySelector('.skip').onclick=()=>finish(null,'skipped');
  card.querySelector('.note').onclick=()=>action(async()=>{await request('/rest/v1/training_logs?id=eq.'+r.id,'PATCH',{comment:note.value});r.comment=note.value;msg('コメントを保存しました。');});
- if(r.status!=='planned'){card.querySelector('.primary').textContent=r.status==='completed'?`✓ 達成済み ${r['actual_'+measure]}${unit} × ${r.actual_sets}セット / ${efforts[r.effort_level]||'体感未申告'}`:'見送り済み';card.querySelectorAll('.controls button,.controls input,.primary,.ratings button,.skip').forEach(el=>{el.disabled=true;el.dataset.locked='true';});}
+ if(r.status!=='planned'){card.querySelector('.primary').textContent=r.status==='completed'?`✓ 達成済み ${r['actual_'+measure]}${unit} × ${r.actual_sets}セット / ${efforts[r.effort_level]||'体感未申告'}`:'見送り済み';card.querySelectorAll('.controls button,.controls input,.timer-start,.primary,.ratings button,.skip').forEach(el=>{el.disabled=true;el.dataset.locked='true';});}
  $('#quests').append(card);}
 }
 $('#login').onsubmit=e=>{e.preventDefault();action(async()=>{if(!configured())throw new Error('最初に mobile/config.js にSupabase URLと公開キーを設定してください。');session=null;session=await request('/auth/v1/token?grant_type=password','POST',{email:$('#email').value,password:$('#password').value});$('#password').value='';$('#login').hidden=true;$('#workspace').hidden=false;await load();msg('読み込みました。');});};
