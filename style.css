@@ -9,3 +9,5 @@
 .timer-sub{font-size:.82rem;color:var(--muted,#91aaa7)}
 .timer-stop{grid-column:2;font-size:.78rem;padding:.35rem .6rem}
 .timer[hidden]{display:none}
+.body-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+.metric:last-child{grid-column:auto}

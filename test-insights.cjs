@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict');
+const {summarize}=require('./insights');
+const item=(day,weight,fat,muscle)=>({measured_at:`2026-09-${day}T09:00:00+09:00`,weight_kg:weight,body_fat_percent:fat,muscle_mass_kg:muscle});
+assert.match(summarize([], '2026-09-30').text,/ありません/);
+const stale=summarize([item('21',80,20,60)],'2026-09-30');
+assert.match(stale.text,/記録が追いついていない/);
+assert.match(stale.details[0],/未同期/);
+const trend=summarize([item('14',81,20,60),item('15',81,20,60),item('22',80.9,19.5,60.1),item('23',80.8,19.4,60.1)],'2026-09-24');
+assert.match(trend.details.join(' '),/直近7日/);
+assert.match(trend.details.join(' '),/筋肉量/);
+console.log('Body insights: empty, stale, and weekly comparisons passed.');
